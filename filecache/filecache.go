@@ -67,8 +67,6 @@ func (f *FileCache) parse() {
 	json.Unmarshal(dat, &stored)
 	if err == nil {
 		f.Keys = stored.Keys
-		enc := json.NewEncoder(os.Stdout)
-		enc.Encode(f)
 	} else {
 		fmt.Println("ERROR Reading cache", err)
 	}

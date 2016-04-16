@@ -4,10 +4,11 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"strings"
 
-	"./filecache"
+	"github.com/lucascaro/assh/filecache"
 )
 
 var fc = filecache.New("${HOME}/.asshcache")
@@ -25,6 +26,10 @@ func main() {
 	user := flag.String("u", "ec2-user", "ssh user name")
 	flag.Parse()
 
+	if len(flag.Args()) < 1 {
+		fmt.Println("Auto Scaling Group name is required")
+		os.Exit(1)
+	}
 	asgName := flag.Arg(0)
 	fmt.Println("fetching IPs for asg: ", asgName)
 
