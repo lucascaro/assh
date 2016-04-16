@@ -22,7 +22,7 @@ func main() {
 		fmt.Println("\nFlags:")
 		flag.PrintDefaults()
 	}
-	sshKey := flag.String("i", "${HOME}/.ssh/fpc-rcloud-ecs.pem", "your ssh key")
+	sshKey := flag.String("i", "${HOME}/.ssh/id-rsa.pem", "your ssh key")
 	user := flag.String("u", "ec2-user", "ssh user name")
 	flag.Parse()
 
