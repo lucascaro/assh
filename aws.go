@@ -21,10 +21,10 @@ func GetIPAddresses(asg string) []string {
 	return ips
 }
 
-func getInstanceIds(asg string) []string {
-	ids := []string{}
+func getInstanceIds(asg string) (ids []string) {
 	cmd := "aws"
-	args := []string{"autoscaling",
+	args := []string{
+		"autoscaling",
 		"describe-auto-scaling-groups",
 		"--auto-scaling-group-names",
 		asg,
@@ -45,37 +45,42 @@ func getInstanceIds(asg string) []string {
 
 	fmt.Printf("Instances in ASG: %s\n", out)
 
-	// Split lines and parse for instance ids
-	lines := strings.Split(string(out), "\n")
+	ids = parseInstanceIds(string(out))
+	return ids
+}
+
+// Split lines and parse for instance ids
+func parseInstanceIds(asgInfo string) (ids []string) {
+	lines := strings.Split(string(asgInfo), "\n")
 	for _, line := range lines {
 		fields := strings.Fields(line)
-		if len(fields) < 3 {
-			log.Fatalf("Auto Scaling Group '%s' not found", asg)
-		}
 		if len(fields) > 0 {
+			if len(fields) < 3 {
+				log.Fatalf("Wrong instance information: '%s'", line)
+			}
 			ids = append(ids, fields[2])
 		}
 	}
 	return ids
 }
 
+// Return a list of IPs for the given list of instances.
+// Will try to use cached addresses if found.
 func getInstanceIPs(instanceIds []string) []string {
 	ips, missingIds := getCachedIPs(instanceIds)
 
 	if len(missingIds) > 0 {
 		fmt.Println("Get ips for", missingIds)
-		ips = append(ips, getUncachedInstanceIPs(missingIds)...)
+		ips = append(ips, requestInstanceIPs(missingIds)...)
 
-		for i, ip := range ips {
-			fc.Set(missingIds[i], ip)
-		}
-		fc.Save()
+		storeIPsInCache(instanceIds, ips)
 	}
 
 	return ips
 }
 
-func getUncachedInstanceIPs(ids []string) []string {
+// Fetch IPs for instances from aws.
+func requestInstanceIPs(ids []string) []string {
 	cmd := "aws"
 	args := []string{
 		"ec2",
@@ -97,6 +102,9 @@ func getUncachedInstanceIPs(ids []string) []string {
 
 	return strings.Fields(string(out))
 }
+
+// Get cached ips if they exist in cache.
+// Return the list of ips and the list of instances which don't have cached data
 func getCachedIPs(instanceIds []string) (ips, missingIds []string) {
 	for i, id := range instanceIds {
 		if cached, ok := fc.Get(id); ok == nil {
@@ -107,4 +115,11 @@ func getCachedIPs(instanceIds []string) (ips, missingIds []string) {
 		}
 	}
 	return ips, missingIds
+}
+
+func storeIPsInCache(instanceIds, ips []string) {
+	for i, ip := range ips {
+		fc.Set(instanceIds[i], ip)
+	}
+	fc.Save()
 }
