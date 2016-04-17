@@ -1,3 +1,4 @@
+// assh -- ssh into all instances in a AWS auto scaling group.
 package main
 
 import (
@@ -6,43 +7,73 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
-
-	"github.com/lucascaro/assh/filecache"
 )
 
-var fc = filecache.New("${HOME}/.asshcache")
+type commandOptions struct {
+	SSHKey  string
+	User    string
+	ASGName string
+}
 
 func main() {
+	printIntro()
+	options := setupFlags()
+
+	ips := GetIPAddresses(options.ASGName)
+	fmt.Println("IP Addresses:", ips)
+
+	runSSH(ips, options.User, options.SSHKey)
+}
+
+func asshUsage() {
+	fmt.Println("Usage:")
+	fmt.Println("\t assh [flags] <ASG Name>")
+	fmt.Println("Flags:")
+	flag.PrintDefaults()
+}
+
+func printIntro() {
 	fmt.Println("assh")
-	fmt.Print("\n\t ssh into auto scaling group\n\n")
-	flag.Usage = func() {
-		fmt.Printf("Usage:\n")
-		fmt.Println("\t assh [flags] <ASG Name>")
-		fmt.Println("\nFlags:")
-		flag.PrintDefaults()
-	}
+	fmt.Print("\t ssh into auto scaling group\n\n")
+}
+
+// set up and parse command line flags
+func setupFlags() commandOptions {
+	// Usage text
+	flag.Usage = asshUsage
+
+	// Flags
 	sshKey := flag.String("i", "${HOME}/.ssh/id-rsa.pem", "your ssh key")
 	user := flag.String("u", "ec2-user", "ssh user name")
+
 	flag.Parse()
 
+	// Required arguments
 	if len(flag.Args()) < 1 {
 		fmt.Println("Auto Scaling Group name is required")
 		os.Exit(1)
 	}
-	asgName := flag.Arg(0)
-	fmt.Println("fetching IPs for asg: ", asgName)
 
-	ips := getIPAddresses(asgName)
-	fmt.Println("IP Addresses:", ips)
-	fmt.Println(*sshKey)
-
-	runSSH(ips, *user, *sshKey)
+	// Return a nice struct with all flags and arguments
+	return commandOptions{
+		ASGName: flag.Arg(0),
+		SSHKey:  *sshKey,
+		User:    *user,
+	}
 }
 
+// Run ssh to multiple hosts, using the same user and key.
+// Uses csshx to run.
+// TODO: using cssh if linux.
 func runSSH(ips []string, user, sshKey string) {
 	cmd := "csshx"
+	if runtime.GOOS != "darwin" {
+		cmd = "cssh"
+	}
 	args := []string{}
+	fmt.Println("Running ssh with key: ", sshKey)
 	for _, ip := range ips {
 		args = append(args, user+"@"+ip)
 	}
@@ -53,87 +84,4 @@ func runSSH(ips []string, user, sshKey string) {
 		fmt.Printf("ERROR: %s %s\n", err, out)
 		log.Fatal(err)
 	}
-}
-func getIPAddresses(asg string) []string {
-	ips := []string{}
-	ids := getInstanceIds(asg)
-	fmt.Println("Instance IDs:", ids)
-	ips = getInstanceIPs(ids)
-	return ips
-}
-
-func getInstanceIds(asg string) []string {
-	ids := []string{}
-	cmd := "aws"
-	args := []string{"autoscaling",
-		"describe-auto-scaling-groups",
-		"--auto-scaling-group-names",
-		asg,
-		"--query",
-		"AutoScalingGroups[0].Instances[]",
-		"--output",
-		"text",
-	}
-	out, err := exec.Command(cmd, args...).CombinedOutput()
-	if err != nil {
-		fmt.Printf("ERROR: %s %s\n", err, out)
-		log.Fatal(err)
-	}
-
-	// Split lines
-	lines := strings.Split(string(out), "\n")
-	fmt.Printf("ASG DESCRIBE: %s\n", out)
-
-	for _, line := range lines {
-		fields := strings.Fields(line)
-		if len(fields) > 0 {
-			ids = append(ids, fields[2])
-		}
-	}
-	return ids
-}
-
-func getInstanceIPs(instanceIds []string) []string {
-	var ips []string
-	var missingIds []string
-	for i, id := range instanceIds {
-		if cached, ok := fc.Get(id); ok == nil {
-			fmt.Println("Cached: ", id, cached)
-			ips = append(ips, cached.Value)
-		} else {
-			missingIds = append(missingIds, instanceIds[i])
-		}
-	}
-	instanceIds = missingIds
-	fmt.Println("Get ips for", instanceIds)
-	if len(instanceIds) > 0 {
-		cmd := "aws"
-		args := []string{
-			"ec2",
-			"describe-instances",
-			"--instance-ids",
-		}
-		args = append(args, instanceIds...)
-		args = append(args, "--query",
-			"Reservations[].Instances[].PrivateIpAddress",
-			"--output",
-			"text",
-		)
-		// fmt.Println(args)
-		out, err := exec.Command(cmd, args...).CombinedOutput()
-		if err != nil {
-			fmt.Printf("ERROR: %s %s\n", err, out)
-			log.Fatal(err)
-		}
-
-		ips = strings.Fields(string(out))
-
-		for i, ip := range ips {
-			fc.Set(instanceIds[i], ip)
-		}
-		fc.Save()
-		// fmt.Printf("INSTANCE DESCRIBE: %s\n", ips)
-	}
-
-	return ips
 }
